@@ -12,6 +12,8 @@ use sysinfo::{ComponentExt, System, SystemExt};
 
 #[cfg(target_os = "linux")]
 use psutil::sensors;
+use serde::Deserialize;
+use std::process::Command;
 
 pub struct TempWidget<'a> {
 	title: String,
@@ -41,6 +43,12 @@ impl TempWidget<'_> {
 impl UpdatableWidget for TempWidget<'_> {
 	#[cfg(target_os = "linux")]
 	fn update(&mut self) {
+		#[derive(Debug, Deserialize)]
+		struct GPURecord {
+			name: String,
+			temperature: f64,
+		}
+
 		self.temp_data = sensors::temperatures()
 			.into_iter()
 			.filter_map(|sensor| sensor.ok())
@@ -58,7 +66,29 @@ impl UpdatableWidget for TempWidget<'_> {
 				)
 			})
 			.filter(|data| data.1 > 0.0)
-			.collect()
+			.collect();
+		let mut nvidia: Vec<(String, f64)> = match which::which("nvidia-smi") {
+			Ok(path) => {
+				let gpu_data = Command::new(path.as_os_str())
+					.arg("--query-gpu=name,temperature.gpu")
+					.arg("--format=csv,noheader,nounits")
+					.output();
+
+				match gpu_data {
+					Ok(output) => csv::ReaderBuilder::new()
+						.has_headers(false)
+						.trim(csv::Trim::Fields)
+						.from_reader(output.stdout.as_slice())
+						.into_deserialize::<GPURecord>()
+						.filter_map(|gpu| gpu.ok())
+						.map(|gpu| (gpu.name, gpu.temperature))
+						.collect(),
+					Err(_err) => Vec::new(),
+				}
+			}
+			Err(_error) => Vec::new(),
+		};
+		self.temp_data.append(&mut nvidia);
 	}
 
 	#[cfg(target_os = "macos")]
