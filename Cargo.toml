@@ -34,3 +34,10 @@ which = "4.2.2"
 depends = "$auto"
 section = "utils"
 priority = "optional"
+
+[package.metadata.rpm]
+package = "ytop"
+[package.metadata.rpm.cargo]
+buildflags = ["--release"]
+[package.metadata.rpm.targets]
+ytop = { path = "/usr/bin/ytop" }
