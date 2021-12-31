@@ -29,3 +29,8 @@ tui = { version = "0.9.2", default-features = false, features = ["crossterm"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 csv = "1.1.6"
 which = "4.2.2"
+
+[package.metadata.deb]
+depends = "$auto"
+section = "utils"
+priority = "optional"
