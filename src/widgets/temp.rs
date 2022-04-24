@@ -81,7 +81,7 @@ impl UpdatableWidget for TempWidget<'_> {
 						.from_reader(output.stdout.as_slice())
 						.into_deserialize::<GPURecord>()
 						.filter_map(|gpu| gpu.ok())
-						.map(|gpu| (gpu.name, gpu.temperature))
+						.map(|gpu| (gpu.name.trim_start_matches("NVIDIA ").to_string(), gpu.temperature))
 						.collect(),
 					Err(_err) => Vec::new(),
 				}
@@ -89,6 +89,8 @@ impl UpdatableWidget for TempWidget<'_> {
 			Err(_error) => Vec::new(),
 		};
 		self.temp_data.append(&mut nvidia);
+		self.temp_data
+			.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 	}
 
 	#[cfg(target_os = "macos")]
