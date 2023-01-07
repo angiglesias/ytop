@@ -11,9 +11,10 @@ use crate::widgets::block;
 use sysinfo::{ComponentExt, System, SystemExt};
 
 #[cfg(target_os = "linux")]
+use nvml_wrapper::enum_wrappers::device::TemperatureSensor;
+use nvml_wrapper::error::NvmlError;
+use nvml_wrapper::Nvml;
 use psutil::sensors;
-use serde::Deserialize;
-use std::process::Command;
 
 pub struct TempWidget<'a> {
 	title: String,
@@ -24,6 +25,8 @@ pub struct TempWidget<'a> {
 	temp_threshold: f64,
 
 	temp_data: Vec<(String, f64)>,
+	#[cfg(target_os = "linux")]
+	nvml: Result<Nvml, NvmlError>,
 }
 
 impl TempWidget<'_> {
@@ -36,6 +39,8 @@ impl TempWidget<'_> {
 			fahrenheit,
 			temp_threshold: 80.0,
 			temp_data: Vec::new(),
+			#[cfg(target_os = "linux")]
+			nvml: Nvml::init(),
 		}
 	}
 }
@@ -43,12 +48,6 @@ impl TempWidget<'_> {
 impl UpdatableWidget for TempWidget<'_> {
 	#[cfg(target_os = "linux")]
 	fn update(&mut self) {
-		#[derive(Debug, Deserialize)]
-		struct GPURecord {
-			name: String,
-			temperature: f64,
-		}
-
 		self.temp_data = sensors::temperatures()
 			.into_iter()
 			.filter_map(|sensor| sensor.ok())
@@ -67,27 +66,30 @@ impl UpdatableWidget for TempWidget<'_> {
 			})
 			.filter(|data| data.1 > 0.0)
 			.collect();
-		let mut nvidia: Vec<(String, f64)> = match which::which("nvidia-smi") {
-			Ok(path) => {
-				let gpu_data = Command::new(path.as_os_str())
-					.arg("--query-gpu=name,temperature.gpu")
-					.arg("--format=csv,noheader,nounits")
-					.output();
-
-				match gpu_data {
-					Ok(output) => csv::ReaderBuilder::new()
-						.has_headers(false)
-						.trim(csv::Trim::Fields)
-						.from_reader(output.stdout.as_slice())
-						.into_deserialize::<GPURecord>()
-						.filter_map(|gpu| gpu.ok())
-						.map(|gpu| (gpu.name.trim_start_matches("NVIDIA ").to_string(), gpu.temperature))
-						.collect(),
-					Err(_err) => Vec::new(),
+		// try to extract nvidia configuration
+		let mut nvidia: Vec<(String, f64)> = match &mut self.nvml {
+			Ok(nvml) => {
+				let mut data: Vec<(String, f64)> = Vec::new();
+				let gpu_count = nvml.device_count().unwrap_or_default();
+				for idx in 0..gpu_count {
+					match nvml.device_by_index(idx) {
+						Ok(gpu) => {
+							data.push((
+								gpu.name()
+									.unwrap()
+									.trim_start_matches("NVIDIA ")
+									.to_string(),
+								gpu.temperature(TemperatureSensor::Gpu).unwrap() as f64,
+							));
+						}
+						Err(_) => {}
+					}
 				}
+				data
 			}
-			Err(_error) => Vec::new(),
+			Err(_) => Vec::new(),
 		};
+
 		self.temp_data.append(&mut nvidia);
 		self.temp_data
 			.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
